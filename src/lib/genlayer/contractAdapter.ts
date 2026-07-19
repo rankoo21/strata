@@ -186,25 +186,43 @@ export class ContractAdapter implements StrataAdapter {
     return toPlain(raw) as T;
   }
 
+  // Translate raw RPC/consensus errors into plain, actionable guidance.
+  private explainWriteError(e: unknown): Error {
+    const msg = String((e as any)?.message ?? e);
+    if (/enough funds|insufficient|cover transaction fees/i.test(msg)) {
+      return new Error(
+        "This wallet has no Bradbury funds. Claim test GEN from the Bradbury faucet, then try again.",
+      );
+    }
+    if (/user rejected|4001/i.test(msg)) {
+      return new Error("The transaction was rejected in your wallet.");
+    }
+    return e instanceof Error ? e : new Error(msg);
+  }
+
   private async writeAndWait(functionName: string, args: unknown[]): Promise<any> {
     // Writes require a tagged core (a connected wallet). No burner fallback.
     if (!this.isUsingWallet() || !this.walletClient) {
       throw new Error(NEED_WALLET_MESSAGE);
     }
     const client = this.walletClient;
-    const hash = await client.writeContract({
-      address: this.address,
-      functionName,
-      args: args as any,
-      value: 0n,
-    });
-    const receipt = await client.waitForTransactionReceipt({
-      hash,
-      status: ACCEPTED,
-      interval: 6000,
-      retries: 150,
-    });
-    return receipt;
+    try {
+      const hash = await client.writeContract({
+        address: this.address,
+        functionName,
+        args: args as any,
+        value: 0n,
+      });
+      const receipt = await client.waitForTransactionReceipt({
+        hash,
+        status: ACCEPTED,
+        interval: 6000,
+        retries: 150,
+      });
+      return receipt;
+    } catch (e) {
+      throw this.explainWriteError(e);
+    }
   }
 
   private extractReturn<T>(receipt: any): T | undefined {

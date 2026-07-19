@@ -14,18 +14,19 @@
 
 ## On-chain proof
 
-- **Contract:** [`0x571a4746e0f4274627585a57a9c3bc23a5820880`](https://explorer-bradbury.genlayer.com/address/0x571a4746e0f4274627585a57a9c3bc23a5820880)
+- **Contract:** [`0xFA7bFe823629bFf684be4e172434b3A0a4571441`](https://explorer-bradbury.genlayer.com/address/0xFA7bFe823629bFf684be4e172434b3A0a4571441)
 - **Live app:** [strata-bs2.pages.dev](https://strata-bs2.pages.dev)
-- **Validation:** `genvm-lint` passes; **23 direct tests pass**.
-- **Current hardened state:** 4 columns, 4 layers, 4 testimonies, and 0 faults.
+- **Validation:** `genvm-lint` passes; **24 direct tests pass**.
 
 ### Reviewer remediation
 
-Strata now uses Jaccard intersection-over-union, rejects padded or unsupported canonical claims, resolves target layers deterministically from lexical overlap, and compares relations by state-driving polarity: `support`, `conflict`, or `new`. Adjacent weight bands are tolerated, but materially different bands remain disagreements. The leader's exact claim is grounded before persistence; no second free-form claim is compared.
+- **Unique-supporter provenance.** A layer now hardens only on distinct author addresses, never on one author repeating themselves. Each layer tracks its unique supporter and contradictor addresses; a repeat testimony from an author already on the layer is recorded but adds no weight, no supporter, and no fault. Repeated unauthenticated testimony can no longer harden a claim.
+- **Consensus covers every mutation-driving field.** Validators agree on the relation polarity (`support` / `conflict` / `new`), the resolved target layer, and the weight band (within one notch), and the exact canonical claim must be grounded in the testimony before persistence. Target layers are resolved deterministically from lexical overlap so nodes agree on which layer is mutated and on the stored claim.
+- **Faithful grounding.** Jaccard intersection-over-union is used for overlap, and padded or unsupported canonical claims are rejected before any state is written.
 
 ### Current Bradbury limitation
 
-The deployed leader correctly classified the latest corroboration and produced a grounded claim, but Bradbury ended the attempts with `LEADER_TIMEOUT` and all validators `NOT_VOTED`. Therefore this README does **not** claim a finalized live merge or fault on the hardened deployment. Merge and fault behavior is verified by the 23 passing direct tests; live finalization is currently blocked by validator infrastructure, not a recorded contract disagreement.
+Merge, hardening, and fault behavior (including the unique-supporter rule) are verified by the 24 passing direct tests. A prior live corroboration attempt on Bradbury ended in `LEADER_TIMEOUT` with validators `NOT_VOTED`, so this README does **not** claim a finalized live merge or fault; that is a validator-infrastructure timeout, not a recorded contract disagreement.
 
 ## What it is
 
@@ -93,7 +94,7 @@ The adapter swap is invisible to the UI. `src/lib/genlayer/index.ts` selects the
 
 ```
 NEXT_PUBLIC_STRATA_MODE=contract
-NEXT_PUBLIC_STRATA_CONTRACT=0x571a4746e0f4274627585a57a9c3bc23a5820880
+NEXT_PUBLIC_STRATA_CONTRACT=0xFA7bFe823629bFf684be4e172434b3A0a4571441
 NEXT_PUBLIC_STRATA_NETWORK=bradbury
 ```
 
@@ -105,3 +106,4 @@ With `NEXT_PUBLIC_STRATA_MODE` unset or `mock`, the app uses the in-memory adapt
 - Framer Motion, Zustand
 - genlayer-js for contract reads and writes
 - Deployed on Cloudflare Pages
+

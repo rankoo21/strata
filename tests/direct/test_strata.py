@@ -64,11 +64,13 @@ def test_add_testimony_new_claim_floats(deploy, direct_vm):
     assert layer["faultFlag"] is False
 
 
-def test_add_testimony_corroborates_and_sinks(deploy, direct_vm):
+def test_add_testimony_corroborates_and_sinks(deploy, direct_vm, direct_alice, direct_bob):
     column_id, layer_id = _open_with_first_layer(deploy, direct_vm)
 
     direct_vm.clear_mocks()
     direct_vm.mock_llm(r".*", corroborate_response(target=0, band="strong", claim=BRIDGE_CLAIM))
+    # A DISTINCT author corroborates, so weight and unique supporters grow.
+    direct_vm.sender = direct_bob
     res = deploy.add_testimony(column_id, CORROBORATE_TEXT, "heard", 3000)
     assert res["relation"] == "corroborates"
 
@@ -80,21 +82,46 @@ def test_add_testimony_corroborates_and_sinks(deploy, direct_vm):
     assert layer["depth"] > 0
 
 
-def test_layer_hardens_past_threshold(deploy, direct_vm):
+def test_layer_hardens_past_threshold(deploy, direct_vm, direct_alice, direct_bob, direct_charlie):
     column_id, layer_id = _open_with_first_layer(deploy, direct_vm)
 
     direct_vm.clear_mocks()
     direct_vm.mock_llm(r".*", corroborate_response(target=0, band="strong", claim=BRIDGE_CLAIM))
+    # Three DISTINCT authors are required to harden. alice seeded the layer;
+    # bob and charlie each corroborate once.
+    direct_vm.sender = direct_bob
     deploy.add_testimony(column_id, CORROBORATE_TEXT, "heard", 3000)
+    direct_vm.sender = direct_charlie
     deploy.add_testimony(column_id, CORROBORATE_TEXT, "recorded", 4000)
 
     layer = deploy.get_layer(layer_id)
-    # weight: 100 base + 300 + 300 = 700 >= 600, supporters 3 >= 3 -> hardened.
+    # weight: 100 base + 300 + 300 = 700 >= 600, unique supporters 3 >= 3 -> hardened.
     assert layer["weight"] >= 600
     assert layer["supporters"] >= 3
     assert layer["hardened"] is True
     assert layer["state"] == "hardened"
     assert layer["depth"] >= 750
+
+
+def test_repeated_same_author_cannot_harden(deploy, direct_vm, direct_alice):
+    # The reviewer's core concern: repeated UNAUTHENTICATED testimony from one
+    # author must not harden a claim. alice seeds the layer and then corroborates
+    # it many times herself; the layer must stay a single-supporter floating
+    # claim and never harden.
+    column_id, layer_id = _open_with_first_layer(deploy, direct_vm)
+
+    direct_vm.clear_mocks()
+    direct_vm.mock_llm(r".*", corroborate_response(target=0, band="strong", claim=BRIDGE_CLAIM))
+    for t in range(3000, 3000 + 5 * 1000, 1000):
+        # Same sender (alice) every time.
+        deploy.add_testimony(column_id, CORROBORATE_TEXT, "heard", t)
+
+    layer = deploy.get_layer(layer_id)
+    # Still one unique supporter, no extra weight, never hardened.
+    assert layer["supporters"] == 1
+    assert layer["weight"] == 100
+    assert layer["hardened"] is False
+    assert layer["state"] == "floating"
 
 
 def test_isolated_claim_cannot_self_harden(deploy, direct_vm):
@@ -160,11 +187,12 @@ def test_fabricated_corroboration_falls_back_to_new(deploy, direct_vm):
 # take_reading
 # ---------------------------------------------------------------------------
 
-def test_take_reading_recomputes(deploy, direct_vm):
+def test_take_reading_recomputes(deploy, direct_vm, direct_alice, direct_bob):
     column_id, layer_id = _open_with_first_layer(deploy, direct_vm)
 
     direct_vm.clear_mocks()
     direct_vm.mock_llm(r".*", corroborate_response(target=0, band="strong", claim=BRIDGE_CLAIM))
+    direct_vm.sender = direct_bob
     deploy.add_testimony(column_id, CORROBORATE_TEXT, "heard", 3000)
 
     reading = deploy.take_reading(column_id, 5000)
@@ -182,17 +210,20 @@ def test_take_reading_requires_layers(deploy, direct_vm):
 # paged views
 # ---------------------------------------------------------------------------
 
-def test_get_layers_surface_to_deep(deploy, direct_vm):
+def test_get_layers_surface_to_deep(deploy, direct_vm, direct_alice, direct_bob, direct_charlie):
     column_id, hardened_layer = _open_with_first_layer(deploy, direct_vm)
-    # Harden the first layer so it sinks deep.
+    # Harden the first layer so it sinks deep (three distinct authors).
     direct_vm.clear_mocks()
     direct_vm.mock_llm(r".*", corroborate_response(target=0, band="strong", claim=BRIDGE_CLAIM))
+    direct_vm.sender = direct_bob
     deploy.add_testimony(column_id, CORROBORATE_TEXT, "heard", 3000)
+    direct_vm.sender = direct_charlie
     deploy.add_testimony(column_id, CORROBORATE_TEXT, "recorded", 4000)
 
     # Add a fresh floating claim near the surface.
     direct_vm.clear_mocks()
     direct_vm.mock_llm(r".*", new_response(band="slight", claim="A late surface rumor"))
+    direct_vm.sender = direct_alice
     deploy.add_testimony(column_id, "A late surface rumor about the lights.", "heard", 5000)
 
     layers = deploy.get_layers(column_id, 0, 20)
@@ -215,11 +246,13 @@ def test_get_columns_newest_first(deploy):
 # archive_core + summary
 # ---------------------------------------------------------------------------
 
-def test_archive_core_snapshots_hardened_layers(deploy, direct_vm):
+def test_archive_core_snapshots_hardened_layers(deploy, direct_vm, direct_alice, direct_bob, direct_charlie):
     column_id, layer_id = _open_with_first_layer(deploy, direct_vm)
     direct_vm.clear_mocks()
     direct_vm.mock_llm(r".*", corroborate_response(target=0, band="strong", claim=BRIDGE_CLAIM))
+    direct_vm.sender = direct_bob
     deploy.add_testimony(column_id, CORROBORATE_TEXT, "heard", 3000)
+    direct_vm.sender = direct_charlie
     deploy.add_testimony(column_id, CORROBORATE_TEXT, "recorded", 4000)
 
     core_id = deploy.archive_core(column_id, "0xcafe", 6000)

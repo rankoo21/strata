@@ -208,8 +208,8 @@ class Layer:
     claim: str
     relation: str
     weight: u256
-    supporters: u256
-    contradictions: u256
+    supporters: u256          # DERIVED: count of UNIQUE supporter addresses
+    contradictions: u256      # DERIVED: count of UNIQUE contradictor addresses
     hardened: bool
     fault_flag: bool
     state: str
@@ -217,6 +217,13 @@ class Layer:
     created_at: u256
     updated_at: u256
     testimony_ids_json: str
+    # Unique-supporter provenance. A layer hardens on distinct authors, never on
+    # one author repeating themselves. These hold the distinct addresses that
+    # corroborated (supporter_ids) or contradicted/distorted (contradictor_ids)
+    # this layer; the supporters/contradictions counts above are kept in sync
+    # with the length of these sets so hardening is authenticated by provenance.
+    supporter_ids_json: str
+    contradictor_ids_json: str
 
 
 @allow_storage
@@ -317,6 +324,21 @@ class StrataContract(gl.Contract):
         items = self._load_list(raw)
         items.append(new_id)
         return json.dumps(items)
+
+    def _add_unique(self, raw: str, addr: str) -> tuple:
+        """Add addr to a JSON list of addresses only if not already present.
+
+        Returns (new_json, is_new, unique_count). This is the provenance
+        primitive: repeated testimony from the same author does not grow the
+        unique set, so it cannot inflate weight or harden a layer.
+        """
+        items = self._load_list(raw)
+        norm = str(addr).strip().lower()
+        seen = [str(x).strip().lower() for x in items]
+        if norm in seen:
+            return json.dumps(items), False, len(items)
+        items.append(addr)
+        return json.dumps(items), True, len(items)
 
     def _now(self, now_ms: int) -> int:
         return int(now_ms) if int(now_ms) > 0 else 0
@@ -870,6 +892,7 @@ class StrataContract(gl.Contract):
             # A fresh isolated claim drops near the surface and floats.
             l_index = int(self.layer_count)
             layer_id = "lyr_" + str(l_index)
+            author = self._sender_hex()
             layer = Layer(
                 id=layer_id,
                 column_id=column_id,
@@ -885,6 +908,8 @@ class StrataContract(gl.Contract):
                 created_at=u256(now),
                 updated_at=u256(now),
                 testimony_ids_json=json.dumps([testimony_id]),
+                supporter_ids_json=json.dumps([author]),
+                contradictor_ids_json=json.dumps([]),
             )
             self._recompute_layer(layer)
             self.layers[layer_id] = layer
@@ -896,14 +921,26 @@ class StrataContract(gl.Contract):
 
         elif relation == REL_CORROBORATES:
             layer = existing[target]
-            layer.weight = u256(min(int(layer.weight) + contribution, WEIGHT_MAX))
-            layer.supporters = u256(int(layer.supporters) + 1)
+            author = self._sender_hex()
+            new_ids, is_new_supporter, unique_count = self._add_unique(
+                layer.supporter_ids_json, author
+            )
             layer.testimony_ids_json = self._append_id(layer.testimony_ids_json, testimony_id)
             layer.updated_at = u256(now)
+            if is_new_supporter:
+                # Only a DISTINCT author moves the record: weight grows and the
+                # unique supporter count rises. Repeated testimony from an author
+                # already on the layer records the testimony but cannot add
+                # weight or push the layer toward hardening.
+                layer.supporter_ids_json = new_ids
+                layer.supporters = u256(unique_count)
+                layer.weight = u256(min(int(layer.weight) + contribution, WEIGHT_MAX))
             self._recompute_layer(layer)
             result["layerId"] = layer.id
             result["state"] = layer.state
-            if layer.state == STATE_HARDENED:
+            if not is_new_supporter:
+                result["note"] = "You already corroborated this layer. Recorded, but the rock did not move."
+            elif layer.state == STATE_HARDENED:
                 result["note"] = "This corroborates the deep. The layer hardened into rock."
             else:
                 result["note"] = "This corroborates the deep. The layer sank and gained weight."
@@ -911,51 +948,67 @@ class StrataContract(gl.Contract):
         else:
             # contradicts or distorts: record a fault touching the target layer.
             layer = existing[target]
-            layer.contradictions = u256(int(layer.contradictions) + 1)
-            layer.fault_flag = True
+            author = self._sender_hex()
+            new_c_ids, is_new_contradictor, unique_contras = self._add_unique(
+                layer.contradictor_ids_json, author
+            )
             layer.testimony_ids_json = self._append_id(layer.testimony_ids_json, testimony_id)
             layer.updated_at = u256(now)
 
-            # A distortion erodes some weight; a direct contradiction erodes more,
-            # but a hardened layer needs sustained counter-agreement to amend.
-            erosion = contribution if relation == REL_CONTRADICTS else (contribution // 2)
-            if bool(layer.hardened) and int(layer.contradictions) < AMEND_CONTRADICTION_MIN:
-                erosion = 0
-            new_weight = int(layer.weight) - erosion
-            if new_weight < 0:
-                new_weight = 0
-            layer.weight = u256(new_weight)
+            if is_new_contradictor:
+                # Only a DISTINCT contradictor cracks the record further: the
+                # unique contradiction count rises and weight erodes. One author
+                # repeating a contradiction cannot manufacture sustained
+                # counter-agreement against a layer on their own.
+                layer.contradictor_ids_json = new_c_ids
+                layer.contradictions = u256(unique_contras)
+                layer.fault_flag = True
+                # A distortion erodes some weight; a direct contradiction erodes
+                # more, but a hardened layer needs sustained counter-agreement
+                # (>= AMEND_CONTRADICTION_MIN distinct contradictors) to amend.
+                erosion = contribution if relation == REL_CONTRADICTS else (contribution // 2)
+                if bool(layer.hardened) and unique_contras < AMEND_CONTRADICTION_MIN:
+                    erosion = 0
+                new_weight = int(layer.weight) - erosion
+                if new_weight < 0:
+                    new_weight = 0
+                layer.weight = u256(new_weight)
             self._recompute_layer(layer)
-
-            f_index = int(self.fault_count)
-            fault_id = "flt_" + str(f_index)
-            weight_a = int(layer.weight)
-            weight_b = WEIGHT_BASE
-            if weight_a > weight_b:
-                holding = "deep"
-            elif weight_b > weight_a:
-                holding = "surface"
-            else:
-                holding = "even"
-            fault = Fault(
-                id=fault_id,
-                column_id=column_id,
-                layer_id=layer.id,
-                claim_a=layer.claim,
-                claim_b=claim,
-                depth=u256(int(layer.depth)),
-                weight_a=u256(weight_a),
-                weight_b=u256(weight_b),
-                holding_side=holding,
-                created_at=u256(now),
-            )
-            self.faults[fault_id] = fault
-            self.fault_count = u256(f_index + 1)
-            column.fault_ids_json = self._append_id(column.fault_ids_json, fault_id)
-            result["faultId"] = fault_id
             result["layerId"] = layer.id
             result["state"] = layer.state
-            result["note"] = "A fault appeared. Two claims collide here."
+
+            if not is_new_contradictor:
+                # A repeat contradiction from the same author is recorded as
+                # testimony but cannot crack a fresh fault or erode the record.
+                result["note"] = "You already contradicted this layer. Recorded, but no new fault opened."
+            else:
+                f_index = int(self.fault_count)
+                fault_id = "flt_" + str(f_index)
+                weight_a = int(layer.weight)
+                weight_b = WEIGHT_BASE
+                if weight_a > weight_b:
+                    holding = "deep"
+                elif weight_b > weight_a:
+                    holding = "surface"
+                else:
+                    holding = "even"
+                fault = Fault(
+                    id=fault_id,
+                    column_id=column_id,
+                    layer_id=layer.id,
+                    claim_a=layer.claim,
+                    claim_b=claim,
+                    depth=u256(int(layer.depth)),
+                    weight_a=u256(weight_a),
+                    weight_b=u256(weight_b),
+                    holding_side=holding,
+                    created_at=u256(now),
+                )
+                self.faults[fault_id] = fault
+                self.fault_count = u256(f_index + 1)
+                column.fault_ids_json = self._append_id(column.fault_ids_json, fault_id)
+                result["faultId"] = fault_id
+                result["note"] = "A fault appeared. Two claims collide here."
 
         testimony = Testimony(
             id=testimony_id,

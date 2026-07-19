@@ -59,10 +59,18 @@ export function CoreTag() {
             className="font-mark text-[10px] tracking-[0.16em] uppercase"
             style={{ color: tagged ? "#1a1712" : "#8C8A82" }}
           >
-            {tagged ? (hover ? tagLabel : "Core tagged") : "Tag your core"}
+            {tagged ? (hover ? `${tagLabel} · release` : "Core tagged") : "Connect wallet"}
           </span>
         </div>
       </motion.button>
+      {!tagged && (
+        <p
+          className="mt-2 max-w-[13rem] text-right font-mark text-[10px] leading-relaxed"
+          style={{ color: "rgba(140,138,130,0.6)", letterSpacing: "0.04em" }}
+        >
+          Connect a Bradbury-funded wallet to add and settle testimony. Viewing needs no wallet.
+        </p>
+      )}
     </div>
   );
 }
