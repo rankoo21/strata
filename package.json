@@ -1,19 +1,16 @@
 {
-  "name": "strata",
+  "name": "specmatch",
   "version": "0.1.0",
   "private": true,
-  "description": "Memory, settled into stone.",
+  "description": "Evidence-grounded interface compatibility consensus on GenLayer.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
-    "contract:lint": "genvm-lint check contracts/StrataContract.py --json",
-    "test:direct": "python -m pytest tests/direct/ -p gltest_direct -q",
-    "deploy": "node scripts/deploy.mjs",
-    "livecheck": "node scripts/livecheck.mjs",
-    "fulltest": "node scripts/fulltest.mjs"
+    "contract:lint": "genvm-lint check contracts/SpecMatchContract.py --json",
+    "test:direct": "python -m pytest tests/direct/ -p gltest_direct -q"
   },
   "dependencies": {
     "framer-motion": "^11.3.0",

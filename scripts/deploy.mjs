@@ -23,7 +23,7 @@ import { TransactionStatus } from "genlayer-js/types";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
 const envPath = join(root, ".env.deploy");
-const contractPath = join(root, "contracts", "StrataContract.py");
+const contractPath = join(root, "contracts", "SpecMatchContract.py");
 
 function parseEnv(path) {
   const out = {};
@@ -55,10 +55,10 @@ function pickChain(name) {
 
 function writeBackAddress(path, address) {
   let text = existsSync(path) ? readFileSync(path, "utf8") : "";
-  if (/^STRATA_CONTRACT_ADDRESS=.*$/m.test(text)) {
-    text = text.replace(/^STRATA_CONTRACT_ADDRESS=.*$/m, `STRATA_CONTRACT_ADDRESS=${address}`);
+  if (/^SPECMATCH_CONTRACT_ADDRESS=.*$/m.test(text)) {
+    text = text.replace(/^SPECMATCH_CONTRACT_ADDRESS=.*$/m, `SPECMATCH_CONTRACT_ADDRESS=${address}`);
   } else {
-    text += (text.endsWith("\n") || text === "" ? "" : "\n") + `STRATA_CONTRACT_ADDRESS=${address}\n`;
+    text += (text.endsWith("\n") || text === "" ? "" : "\n") + `SPECMATCH_CONTRACT_ADDRESS=${address}\n`;
   }
   writeFileSync(path, text);
 }
@@ -84,7 +84,7 @@ async function main() {
   const client = createClient(clientOpts);
 
   const code = readFileSync(contractPath);
-  console.log("Deploying StrataContract...");
+  console.log("Deploying SpecMatchContract...");
 
   const txHash = await client.deployContract({ code, args: [] });
   console.log(`Deploy tx: ${txHash}`);
@@ -113,15 +113,15 @@ async function main() {
   }
 
   console.log("");
-  console.log("Deployed StrataContract at:");
+  console.log("Deployed SpecMatchContract at:");
   console.log("  " + address);
   writeBackAddress(envPath, address);
 
   console.log("");
   console.log("Add these to your frontend env (.env.local) to read live:");
-  console.log(`  NEXT_PUBLIC_STRATA_MODE=contract`);
-  console.log(`  NEXT_PUBLIC_STRATA_CONTRACT=${address}`);
-  console.log(`  NEXT_PUBLIC_STRATA_NETWORK=${networkName}`);
+  console.log(`  NEXT_PUBLIC_SPECMATCH_MODE=contract`);
+  console.log(`  NEXT_PUBLIC_SPECMATCH_CONTRACT=${address}`);
+  console.log(`  NEXT_PUBLIC_SPECMATCH_NETWORK=${networkName}`);
 }
 
 main().catch((err) => {
